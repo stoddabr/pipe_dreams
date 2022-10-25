@@ -3,7 +3,9 @@
   margin: 0 auto;
   padding: 0;
   text-align: center;
-  background-color: gray;
+  background-color: black;
+  display: flex;
+  justify-content: center;
 }
 
 .app-main {

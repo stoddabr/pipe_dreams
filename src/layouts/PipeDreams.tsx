@@ -3,11 +3,12 @@ import { Physics, useBox, usePlane, useSphere } from "@react-three/cannon";
 import { OrbitControls } from "@react-three/drei";
 import type { MeshPhongMaterialProps } from "@react-three/fiber";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { forwardRef, useMemo, useRef } from "react";
-import type { InstancedMesh, Mesh } from "three";
-import { Color } from "three";
+import { forwardRef, useMemo, useRef, useState } from "react";
+import { InstancedMesh, Mesh, Vector3 } from "three";
+import * as THREE from "three";
 import CameraController from "../components/CameraControls";
 import { mergeRefs } from "../utils/mergeRefs";
+import * as React from "react";
 
 type OurPlaneProps = Pick<MeshPhongMaterialProps, "color"> &
   Pick<PlaneProps, "position" | "rotation">;
@@ -16,110 +17,112 @@ function Plane({ color, ...props }: OurPlaneProps) {
   const [ref] = usePlane(() => ({ ...props }), useRef<Mesh>(null));
   return (
     <mesh ref={ref} receiveShadow>
-      <planeBufferGeometry args={[1000, 1000]} />
-      <meshPhongMaterial color={color} />
+      <planeGeometry args={[1000, 1000]} />
+      <meshPhongMaterial side={THREE.DoubleSide} color={color} />
     </mesh>
   );
 }
 
+const cv = new Vector3(); // character velocity
+const speed = 10; // character speed multiplier
+
+const Character = () => {
+  const [ref, api] = useSphere(
+    () => ({
+      mass: 1,
+      args: [1],
+      position: [0, 0, -10],
+      type: "Kinematic",
+      collisionFilterGroup: 42,
+    }),
+    useRef<Mesh>(null)
+  );
+
+  const [isMovingX, setIsMovingX] = useState(0);
+  const [isMovingY, setIsMovingY] = useState(0);
+
+  useFrame((state, delta) => {
+    api.velocity.copy(cv);
+    api.velocity.set(cv.x + isMovingX * speed, cv.y + isMovingY * speed, 0);
+  });
+
+  function onKeyDown(e: KeyboardEvent) {
+    console.log("ondown", e.key);
+    if (e.key === "ArrowLeft") setIsMovingX(-1);
+    if (e.key === "ArrowRight") setIsMovingX(1);
+    if (e.key === "ArrowUp") setIsMovingY(1);
+    if (e.key === "ArrowDown") setIsMovingY(-1);
+  }
+
+  function onKeyUp(e: KeyboardEvent) {
+    if (e.key === "ArrowLeft") setIsMovingX(0);
+    if (e.key === "ArrowRight") setIsMovingX(0);
+    if (e.key === "ArrowUp") setIsMovingY(0);
+    if (e.key === "ArrowDown") setIsMovingY(0);
+  }
+
+  React.useEffect(() => {
+    console.log("setting listeners...");
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+  }, []);
+
+  useFrame(() => {});
+
+  return (
+    <mesh ref={ref}>
+      <sphereGeometry />
+      <meshPhongMaterial color={"green"} />
+    </mesh>
+  );
+};
+
 const Cube = forwardRef((props, refFwd) => {
   const [ref, api] = useBox<THREE.Mesh>(() => ({
-    mass: 1,
-    position: [0, 20, 0],
+    mass: 50,
+    onCollide: (e) => {
+      console.log({ e });
+      if (e.collisionFilters.bodyFilterGroup == 42) applyImpulse();
+    },
+    position: [0, 0, 0],
   }));
 
-  function onClick() {
-    const dx = Math.random() * 4 - 2;
-    api.applyImpulse([dx, 20, dx], [0, 0, 0]);
+  function applyImpulse() {
+    const dx = Math.random() - 0.5;
+    api.applyImpulse([dx, dx, 1], [0, 0, 0]);
   }
 
   return (
-    <mesh ref={mergeRefs(refFwd, ref)} onClick={() => onClick()}>
+    <mesh
+      ref={mergeRefs(refFwd, ref)}
+      onClick={() => applyImpulse()}
+      castShadow
+    >
       <boxGeometry />
-      <meshPhongMaterial color={"lightblue"} />
+      <meshPhongMaterial color={"purple"} />
     </mesh>
   );
 });
 
-function InstancedSpheres({ number = 100 }) {
-  const [ref] = useSphere(
-    (index) => ({
-      args: [1],
-      mass: 1,
-      position: [Math.random() - 0.5, Math.random() - 0.5, index * 2],
-    }),
-    useRef<InstancedMesh>(null)
-  );
-  const colors = useMemo(() => {
-    const array = new Float32Array(number * 3);
-    const color = new Color();
-    for (let i = 0; i < number; i++)
-      color
-        .set(
-          `rgb(${Math.floor(Math.random() * 255)},${Math.floor(
-            Math.random() * 255
-          )},${Math.floor(Math.random() * 255)})`
-        )
-        .convertSRGBToLinear()
-        .toArray(array, i * 3);
-    return array;
-  }, [number]);
-
-  return (
-    <instancedMesh
-      ref={ref}
-      castShadow
-      receiveShadow
-      args={[undefined, undefined, number]}
-    >
-      <sphereBufferGeometry args={[1, 16, 16]}>
-        <instancedBufferAttribute
-          attach="attributes-color"
-          args={[colors, 3]}
-        />
-      </sphereBufferGeometry>
-      <meshPhongMaterial vertexColors />
-    </instancedMesh>
-  );
-}
-
 export default () => (
-  <Canvas shadows gl={{ alpha: false }} camera={{ position: [0, -12, 16] }}>
-    <hemisphereLight intensity={0.35} />
-    <spotLight
-      position={[30, 0, 30]}
-      angle={0.3}
-      penumbra={1}
-      intensity={2}
-      castShadow
-      shadow-mapSize-width={256}
-      shadow-mapSize-height={256}
-    />
-    <pointLight position={[-30, 0, -30]} intensity={0.5} />
-    <Physics gravity={[0, -1, 0]}>
-      <Plane color={"yellow"} position={[0, 0, 0]} rotation={[0, 0, 0]} />
-      <Plane
-        color={"orange"}
-        position={[-6, 0, 0]}
-        rotation={[0, Math.PI / 2, 0]}
-      />
-      <Plane
-        color={"blue"}
-        position={[6, 0, 0]}
-        rotation={[0, -Math.PI / 2, 0]}
-      />
-      <Plane
-        color={"purple"}
-        position={[0, 6, 0]}
-        rotation={[Math.PI / 2, 0, 0]}
-      />
-      <Plane
-        color={"lightblue"}
-        position={[0, -6, 0]}
-        rotation={[-Math.PI / 2, 0, 0]}
-      />
-      <Cube />
-    </Physics>
+  <Canvas
+    shadows
+    gl={{ alpha: false }}
+    camera={{ position: [5, 5, 0], rotation: [0, 0, 0] }}
+  >
     <OrbitControls />
+    <pointLight position={[0, 0, 10]} intensity={1} />
+    <pointLight position={[2, 0, 10]} intensity={1} />
+
+    <Physics gravity={[0, 0, -10]}>
+      <Plane color={"white"} position={[0, 0, -10]} rotation={[0, 0, 0]} />
+      <Cube />
+      <Character />
+    </Physics>
   </Canvas>
 );
